@@ -1,4 +1,5 @@
 import { JSDOM } from 'jsdom';
+import pLimit from 'p-limit';
 
 export interface ExtractedPageData {
   url: string;
@@ -11,8 +12,8 @@ export interface ExtractedPageData {
 export function normalizeURL(urlString: string): string {
   const url = new URL(urlString);
   const host = url.hostname;
-  const path = url.pathname.replace(/\/+$/, "");
-  if (path === "") {
+  const path = url.pathname.replace(/\/+$/, '');
+  if (path === '') {
     return host;
   }
   return `${host}${path}`;
@@ -79,70 +80,91 @@ export function getImagesFromHTML(html: string, baseURL: string): string[] {
   return urls;
 }
 
-export async function getHTML(url: string): Promise<string | undefined> {
-  try {
-    const response = await fetch(url, {
-      headers: {
-        "User-Agent": "BootCrawler/1.0",
-      },
+class ConcurrentCrawler {
+  private baseURL: string;
+  private pages: Record<string, number>;
+  private limit: ReturnType<typeof pLimit>;
+
+  constructor(baseURL: string, maxConcurrency = 5) {
+    this.baseURL = baseURL;
+    this.pages = {};
+    this.limit = pLimit(maxConcurrency);
+  }
+
+  private addPageVisit(normalizedURL: string): boolean {
+    if (this.pages[normalizedURL]) {
+      this.pages[normalizedURL]++;
+      return false;
+    }
+
+    this.pages[normalizedURL] = 1;
+    return true;
+  }
+
+  private async getHTML(currentURL: string): Promise<string | undefined> {
+    return await this.limit(async () => {
+      try {
+        const response = await fetch(currentURL, {
+          headers: {
+            'User-Agent': 'BootCrawler/1.0',
+          },
+        });
+
+        if (response.status >= 400) {
+          console.error(`Error fetching ${currentURL}: HTTP ${response.status}`);
+          return;
+        }
+
+        const contentType = response.headers.get('content-type');
+        if (!contentType || !contentType.includes('text/html')) {
+          console.error(`Error fetching ${currentURL}: expected HTML but got ${contentType ?? 'unknown content type'}`);
+          return;
+        }
+
+        return await response.text();
+      } catch (error) {
+        console.error(`Error fetching ${currentURL}:`, error instanceof Error ? error.message : error);
+        return;
+      }
     });
+  }
 
-    if (response.status >= 400) {
-      console.error(`Error fetching ${url}: HTTP ${response.status}`);
-      return;
+  private async crawlPage(currentURL: string): Promise<void> {
+    try {
+      const base = new URL(this.baseURL);
+      const current = new URL(currentURL);
+
+      if (base.hostname !== current.hostname) {
+        return;
+      }
+
+      const normalizedCurrentURL = normalizeURL(current.href);
+      if (!this.addPageVisit(normalizedCurrentURL)) {
+        return;
+      }
+
+      console.log(`Crawling ${current.href}`);
+      const html = await this.getHTML(current.href);
+      if (!html) {
+        return;
+      }
+
+      const nextURLs = getURLsFromHTML(html, this.baseURL);
+      await Promise.all(nextURLs.map((nextURL) => this.crawlPage(nextURL)));
+    } catch (error) {
+      console.error(`Error crawling ${currentURL}:`, error instanceof Error ? error.message : error);
     }
+  }
 
-    const contentType = response.headers.get("content-type");
-    if (!contentType || !contentType.includes("text/html")) {
-      console.error(`Error fetching ${url}: expected HTML but got ${contentType ?? 'unknown content type'}`);
-      return;
-    }
-
-    return await response.text();
-  } catch (error) {
-    console.error(`Error fetching ${url}:`, error instanceof Error ? error.message : error);
-    return;
+  async crawl(): Promise<Record<string, number>> {
+    await this.crawlPage(this.baseURL);
+    return this.pages;
   }
 }
 
-export async function crawlPage(
-  baseURL: string,
-  currentURL: string = baseURL,
-  pages: Record<string, number> = {},
-): Promise<Record<string, number>> {
-  try {
-    const base = new URL(baseURL);
-    const current = new URL(currentURL);
-
-    if (base.hostname !== current.hostname) {
-      return pages;
-    }
-
-    const normalizedCurrentURL = normalizeURL(current.href);
-
-    if (pages[normalizedCurrentURL]) {
-      pages[normalizedCurrentURL]++;
-      return pages;
-    }
-
-    pages[normalizedCurrentURL] = 1;
-    console.log(`Crawling ${current.href}`);
-
-    const html = await getHTML(current.href);
-    if (!html) {
-      return pages;
-    }
-
-    const nextURLs = getURLsFromHTML(html, base.href);
-    for (const nextURL of nextURLs) {
-      pages = await crawlPage(base.href, nextURL, pages);
-    }
-
-    return pages;
-  } catch (error) {
-    console.error(`Error crawling ${currentURL}:`, error instanceof Error ? error.message : error);
-    return pages;
-  }
+export async function crawlSiteAsync(baseURL: string, maxConcurrency = 5): Promise<Record<string, number>> {
+  const crawler = new ConcurrentCrawler(baseURL, maxConcurrency);
+  return await crawler.crawl();
 }
 
 export function extractPageData(html: string, pageURL: string): ExtractedPageData {
