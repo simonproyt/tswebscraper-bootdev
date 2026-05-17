@@ -5,20 +5,37 @@ async function main() {
 
   if (args.length < 1) {
     console.error('Error: Missing URL argument.');
-    console.error('Usage: npm run start -- <baseURL>');
+    console.error('Usage: npm run start -- <baseURL> [maxConcurrency] [maxPages]');
     process.exit(1);
   }
 
-  if (args.length > 1) {
+  if (args.length > 3) {
     console.error('Error: Too many arguments.');
-    console.error('Usage: npm run start -- <baseURL>');
+    console.error('Usage: npm run start -- <baseURL> [maxConcurrency] [maxPages]');
     process.exit(1);
   }
 
   const baseURL = args[0];
+  const maxConcurrency = args[1] ? Number(args[1]) : 5;
+  const maxPages = args[2] ? Number(args[2]) : Infinity;
+
+  if (Number.isNaN(maxConcurrency) || maxConcurrency <= 0) {
+    console.error('Error: maxConcurrency must be a positive number.');
+    process.exit(1);
+  }
+
+  if (Number.isNaN(maxPages) || maxPages <= 0) {
+    console.error('Error: maxPages must be a positive number.');
+    process.exit(1);
+  }
+
   console.log(`Starting crawler at ${baseURL}`);
-  const pages = await crawlSiteAsync(baseURL, 5);
-  console.log('Crawl complete:', pages);
+  console.log(`Max concurrency: ${maxConcurrency}, Max pages: ${maxPages}`);
+  const pages = await crawlSiteAsync(baseURL, maxConcurrency, maxPages);
+  console.log('Crawl complete:');
+  Object.entries(pages).forEach(([url, count]) => {
+    console.log(`${url}: ${count}`);
+  });
   process.exit(0);
 }
 
