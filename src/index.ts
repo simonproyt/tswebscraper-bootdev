@@ -1,4 +1,5 @@
 import { crawlSiteAsync } from './crawl.js';
+import { writeJSONReport } from './report.js';
 
 async function main() {
   const args = process.argv.slice(2);
@@ -33,6 +34,7 @@ async function main() {
   console.log(`Max concurrency: ${maxConcurrency}, Max pages: ${maxPages}`);
   const pages = await crawlSiteAsync(baseURL, maxConcurrency, maxPages);
   console.log('Finished crawling.');
+  writeJSONReport(pages, 'report.json');
   const firstPage = Object.values(pages)[0];
   if (firstPage) {
     console.log(`First page record: ${firstPage['url']} - ${firstPage['heading']}`);
