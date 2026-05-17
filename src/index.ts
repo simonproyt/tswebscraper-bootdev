@@ -1,4 +1,6 @@
-function main() {
+import { crawlPage } from './crawl.js';
+
+async function main() {
   const args = process.argv.slice(2);
 
   if (args.length < 1) {
@@ -15,7 +17,12 @@ function main() {
 
   const baseURL = args[0];
   console.log(`Starting crawler at ${baseURL}`);
+  const pages = await crawlPage(baseURL);
+  console.log('Crawl complete:', pages);
   process.exit(0);
 }
 
-main();
+main().catch((error) => {
+  console.error("Unexpected error:", error instanceof Error ? error.message : error);
+  process.exit(1);
+});
