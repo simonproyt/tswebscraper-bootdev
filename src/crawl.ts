@@ -82,7 +82,7 @@ export function getImagesFromHTML(html: string, baseURL: string): string[] {
 
 class ConcurrentCrawler {
   private baseURL: string;
-  private pages: Record<string, number>;
+  private pages: Record<string, ExtractedPageData>;
   private limit: ReturnType<typeof pLimit>;
   private maxPages: number;
   private shouldStop: boolean;
@@ -102,8 +102,7 @@ class ConcurrentCrawler {
       return false;
     }
 
-    if (this.pages[normalizedURL]) {
-      this.pages[normalizedURL]++;
+    if (normalizedURL in this.pages) {
       return false;
     }
 
@@ -114,7 +113,6 @@ class ConcurrentCrawler {
       return false;
     }
 
-    this.pages[normalizedURL] = 1;
     return true;
   }
 
@@ -164,14 +162,24 @@ class ConcurrentCrawler {
         return;
       }
 
+      this.pages[normalizedCurrentURL] = {
+        url: current.href,
+        heading: '',
+        first_paragraph: '',
+        outgoing_links: [],
+        image_urls: [],
+      };
+
       console.log(`Crawling ${current.href}`);
       const html = await this.getHTML(current.href);
       if (!html) {
         return;
       }
 
-      const nextURLs = getURLsFromHTML(html, this.baseURL);
-      const crawlPromises = nextURLs.map((nextURL) => {
+      const data = extractPageData(html, current.href);
+      this.pages[normalizedCurrentURL] = data;
+
+      const crawlPromises = data.outgoing_links.map((nextURL) => {
         const task = this.crawlPage(nextURL).finally(() => {
           this.allTasks.delete(task);
         });
@@ -185,14 +193,14 @@ class ConcurrentCrawler {
     }
   }
 
-  async crawl(): Promise<Record<string, number>> {
+  async crawl(): Promise<Record<string, ExtractedPageData>> {
     await this.crawlPage(this.baseURL);
     await Promise.all(this.allTasks);
     return this.pages;
   }
 }
 
-export async function crawlSiteAsync(baseURL: string, maxConcurrency = 5, maxPages = Infinity): Promise<Record<string, number>> {
+export async function crawlSiteAsync(baseURL: string, maxConcurrency = 5, maxPages = Infinity): Promise<Record<string, ExtractedPageData>> {
   const crawler = new ConcurrentCrawler(baseURL, maxConcurrency, maxPages);
   return await crawler.crawl();
 }
